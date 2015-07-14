@@ -1,7 +1,7 @@
 'use strict';
 
 var RemoteVideo = (function(){
-  var SIGNALING_CHANNEL_HOST = "ws://localhost:5000/";
+  var SIGNALING_CHANNEL_HOST = "ws://my-live-chat.herokuapp.com:5000/";
 
 
   var ServiceBase = function(key, options){
