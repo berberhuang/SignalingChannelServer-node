@@ -2,37 +2,46 @@
 
 var RemoteVideo = (function(){
   var SIGNALING_CHANNEL_HOST = "ws://my-live-chat.herokuapp.com/";
+  // var SIGNALING_CHANNEL_HOST = "ws://127.0.0.1:5000/";
 
 
   var ServiceBase = function(key, options){
     var constraints = options['constraints'];
     var localVideoElement = options['localVideoElement'];
     var remoteVideoElement = options['remoteVideoElement'];
-
-    this.signalingChannel = new RemoteVideo.SignalingChannel(key, 
-      SIGNALING_CHANNEL_HOST);
+    this._stream = null;
     
-    this.webRTCNode = new RemoteVideo.WebRTCNode(this.signalingChannel, {
-      isMaster: this.isMaster,
-      remoteVideoOutput: remoteVideoElement
-    });
+    this.signalingChannel = new SignalingChannel(key, 
+          SIGNALING_CHANNEL_HOST);
 
     this.signalingChannel.onconnected = function(){
-      this.webRTCNode.init();
+      console.log('connnected');
 
-      getUserMedia(constraints, function (stream) {
-        if(localVideoElement){
-          localVideoElement.src = URL.createObjectURL(stream);
-        }
-        this.webRTCNode.addStream(stream);
-      }.bind(this), logError);
+      this.webRTCNode = new WebRTCNode(this.signalingChannel, {
+        isMaster: this.isMaster,
+        remoteVideoOutput: remoteVideoElement
+      });
+
+      this.webRTCNode.init();
+      this.webRTCNode.addStream(this._stream);
 
     }.bind(this);
 
-    return {
-      start: function(){
+    
+
+    var start = function(){
+      getUserMedia(constraints, function (stream) {
+        this._stream = stream;
+        if(localVideoElement){
+          localVideoElement.src = URL.createObjectURL(this._stream);
+        }
+
         this.signalingChannel.open();
-      }.bind(this)
+      }.bind(this), logError);
+    };
+
+    return {
+      start: start.bind(this)
     };
   };
 
@@ -58,24 +67,6 @@ var RemoteVideo = (function(){
     var _stream = null;
     var pc = null;
 
-    signalingChannel.onmessage = function (evt) {
-      if (!pc)
-        init();
-
-      var message = JSON.parse(evt.data);
-      if(message.sdp){
-        pc.setRemoteDescription(new RTCSessionDescription(message.sdp), function () {
-          
-          if (pc.remoteDescription.type == "offer")
-            pc.createAnswer(_onLocalDescriptionCreate, _logError);
-
-        }, logError);
-
-      } else {
-        pc.addIceCandidate(new RTCIceCandidate(message.candidate));
-      }
-    };
-
     function _onLocalDescriptionCreate(desc) {
       pc.setLocalDescription(desc, function () {
         signalingChannel.send(JSON.stringify({ 
@@ -94,21 +85,40 @@ var RemoteVideo = (function(){
         return;
 
       pc = new RTCPeerConnection(configuration);
+      console.log('create peerConnection');
+
+      signalingChannel.onmessage = function (evt) {
+        var message = JSON.parse(evt.data);
+        if(message.sdp){
+          pc.setRemoteDescription(new RTCSessionDescription(message.sdp), function () {
+            
+            if (pc.remoteDescription.type == "offer")
+              pc.createAnswer(_onLocalDescriptionCreate, _logError);
+
+          }, logError);
+
+        } else {
+          pc.addIceCandidate(new RTCIceCandidate(message.candidate));
+        }
+      };
+
+      signalingChannel.oninterrupt = function(evt){
+        console.log('oninterrupt');
+        console.log('close peerConnection');
+        pc.close();
+      };
 
       if(isMaster){
         pc.onnegotiationneeded = function () {
+          console.log('onnegotiationneeded');
           pc.createOffer(_onLocalDescriptionCreate, _logError);
         }
       }
 
       pc.onaddstream = function (evt) {
+        console.log('onaddstream');
         if(remoteVideoElement)
           remoteVideoElement.src = URL.createObjectURL(evt.stream);
-      };
-
-      pc.onremovestream = function(evt){
-        if(remoteVideoElement)
-          remoteVideoElement.src = null;
       };
 
       pc.onicecandidate = function (evt) {
@@ -137,6 +147,7 @@ var RemoteVideo = (function(){
     function close(){
       if(_stream)
         pc.removeStream(_stream);
+      pc.close();
     }
 
     return {
@@ -159,6 +170,7 @@ var RemoteVideo = (function(){
     var channelStatus = STATUS.NONE;
     var onconnected = null;
     var onmessage = null;
+    var oninterrupt = null;
     var _key = key;
 
     function open(){
@@ -177,6 +189,14 @@ var RemoteVideo = (function(){
               onconnected(evt);
             }
           }
+          return;
+        }
+
+        if(evt.data == 'ctl::interrupt'){
+          console.log(evt.data);
+          channelStatus = STATUS.WAITING;
+          if(oninterrupt)
+            oninterrupt(evt.data);
           return;
         }
 
@@ -200,6 +220,9 @@ var RemoteVideo = (function(){
     return {
       set onconnected(func){
         onconnected = func;
+      },
+      set oninterrupt(func){
+        oninterrupt = func;
       },
       set onmessage(func){
         onmessage = func;

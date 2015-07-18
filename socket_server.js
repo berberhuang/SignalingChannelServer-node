@@ -24,12 +24,13 @@ wss.on("connection", function(ws) {
   ws.on("message", function(msg){
     var mObj = JSON.parse(msg);
     if(mObj.msg == 'ctl::join'){
+      console.log('ctl::join');
       // First stage
       key = mObj.key;
-      if(clients[key]){
+      if(clients[key] && clients[key].length > 0){
         group = clients[key];
         group.push(ws);
-
+        console.log('ctl::ready');
         for(i in group){
           group[i].send('ctl::ready');
         }
@@ -49,7 +50,12 @@ wss.on("connection", function(ws) {
 
   ws.on("close", function() {
     group.splice(group.indexOf(ws), 1);
-    
+    console.log('after len:'+group.length);
+    for(i in group){
+      console.log('ctl::interrupt');
+      group[i].send('ctl::interrupt');
+    }
+
     console.log("websocket connection close")
-  })
+  });
 })
